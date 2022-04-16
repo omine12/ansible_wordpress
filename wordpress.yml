@@ -1,0 +1,108 @@
+- hosts: '{{ip}}'
+  gather_facts: no
+
+  vars:
+    db_name: wp-db
+    db_user: wp-user
+    password: omine
+    hostname: localhost
+
+  tasks:
+    - name: Apache,Mariadb　インストール
+      yum:
+        name: 
+          - httpd
+          - mariadb
+          - mariadb-server
+        state: latest
+
+    - name: php インストール
+      shell: amazon-linux-extras enable php7.3 && yum install php php-gd php-mysqlnd php-xmlrpc -y
+
+    - name: WordPressインストール
+      get_url:
+        url: https://wordpress.org/latest.tar.gz
+        dest: /root/
+
+    - name: パッケージの解凍
+      unarchive:
+        src: /root/wordpress-5.9.3.tar.gz
+        dest: /root/
+        remote_src: yes
+
+    - name: ec-2userをApacheグループに追加
+      user:
+        name: ec2-user
+        groups: apache
+        append: yes
+
+    - name: /var/www を再帰的にApacheグループに変更
+      file:
+        path: /var/www
+        owner: ec2-user
+        group: apache
+        state: directory
+        recurse: yes
+        mode: 2775
+
+    - name: グループの書き込み許可を追加します。
+      shell: |
+        find /var/www -type d -exec sudo chmod 2775 {} \;
+        find /var/www -type f -exec sudo chmod 0664 {} \;
+
+    - name: MySQL-python モジュールの追加
+      yum:
+        name: MySQL-python
+
+    - name: mariadbの起動
+      systemd:
+        state: started
+        name: mariadb
+        enabled: yes
+
+    - name: データベース作成
+      mysql_db:
+        login_user: root
+        name: '{{ db_name }}'
+
+    - name: データベースのユーザ作成
+      mysql_user:
+        login_user: root
+        name: "{{db_user}}"
+        password: "{{password}}"
+        priv: wp-db.*:ALL
+        host: "{{hostname}}"
+        state: present
+      no_log: true
+
+    - name: mariadbの再起動
+      systemd:
+        name: mariadb
+        state: restarted
+
+    - name: WordPress ファイルの配置
+      copy:
+        src: /root/wordpress
+        dest: /var/www/html/blog
+        remote_src: yes
+
+    - name: httpd.conf 差し替え
+      copy:
+        src:  /etc/ansible/httpd.conf
+        dest: /etc/httpd/conf/httpd.conf
+
+      #    - name: wp-config 差し替え
+      #      vars:
+      #        db-name: wp-db
+      #        db-user: wp-user
+      #        password: omine
+      #        hostname: localhost
+      #      template:
+      #        src: /etc/ansible/wp-config.tpl
+      #        dest: /root/wp-config.php
+
+    - name: Apachebの再起動
+      systemd:
+        name: httpd
+        state: started
+        enabled: yes
